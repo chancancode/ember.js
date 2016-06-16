@@ -1,6 +1,7 @@
 import { get } from 'ember-metal/property_get';
 import { set } from 'ember-metal/property_set';
 import { tagFor } from 'ember-metal/tags';
+import { didRender } from 'ember-metal/transaction';
 import symbol from 'ember-metal/symbol';
 import { CURRENT_TAG, CONSTANT_TAG, VOLATILE_TAG, ConstReference, DirtyableTag, UpdatableTag, combine, isConst } from 'glimmer-reference';
 import { ConditionalReference as GlimmerConditionalReference, NULL_REFERENCE, UNDEFINED_REFERENCE } from 'glimmer-runtime';
@@ -115,6 +116,11 @@ export class PropertyReference extends CachedReference { // jshint ignore:line
         let meta = metaFor(parentValue);
         watchKey(parentValue, _propertyKey, meta);
       }
+
+      if (isEnabled('ember-glimmer-allow-two-way-reflush')) {
+        didRender(parentValue, _propertyKey);
+      }
+
       return get(parentValue, _propertyKey);
     } else {
       return null;

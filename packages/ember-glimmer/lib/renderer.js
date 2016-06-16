@@ -1,6 +1,8 @@
 import { RootReference } from './utils/references';
 import run from 'ember-metal/run_loop';
 import { setHasViews } from 'ember-metal/tags';
+import runInTransaction from 'ember-metal/transaction';
+import isEnabled from 'ember-metal/features';
 import { CURRENT_TAG } from 'glimmer-reference';
 
 const { backburner } = run;
@@ -107,7 +109,13 @@ class Scheduler {
     if (CURRENT_TAG.validate(lastTagValue)) { return; }
     let view = this._root;
     if (view) {
-      view.renderer.rerender(view);
+      if (isEnabled('ember-glimmer-allow-two-way-reflush')) {
+        let shouldReflush;
+        let callback = () => view.renderer.rerender(view, { alwaysRevalidate: true });
+        do { shouldReflush = runInTransaction(callback); } while (shouldReflush);
+      } else {
+        view.renderer.rerender(view);
+      }
     }
   }
 }
@@ -137,9 +145,23 @@ class Renderer {
       isTopLevel: true
     });
 
-    env.begin();
-    let result = view.template.asEntryPoint().render(self, env, { appendTo: target, dynamicScope });
-    env.commit();
+    let result;
+
+    if (isEnabled('ember-glimmer-allow-two-way-reflush')) {
+      let shouldReflush = runInTransaction(() => {
+        env.begin();
+        result = view.template.asEntryPoint().render(self, env, { appendTo: target, dynamicScope });
+        env.commit();
+      });
+
+      let callback = () => result.rerender({ alwaysRevalidate: true });
+
+      while (shouldReflush) {
+        shouldReflush = runInTransaction(callback);
+      }
+    } else {
+      result = view.template.asEntryPoint().render(self, env, { appendTo: target, dynamicScope });
+    }
 
     this._scheduler.registerView(view);
 
@@ -151,9 +173,25 @@ class Renderer {
     let self = new RootReference(view);
     let dynamicScope = new DynamicScope({ view });
 
-    env.begin();
-    let result = view.template.asEntryPoint().render(self, env, { appendTo: target, dynamicScope });
-    env.commit();
+    let result;
+
+    if (isEnabled('ember-glimmer-allow-two-way-reflush')) {
+      let shouldReflush = runInTransaction(() => {
+        env.begin();
+        result = view.template.asEntryPoint().render(self, env, { appendTo: target, dynamicScope });
+        env.commit();
+      });
+
+      let callback = () => result.rerender({ alwaysRevalidate: true });
+
+      while (shouldReflush) {
+        shouldReflush = runInTransaction(callback);
+      }
+    } else {
+      env.begin();
+      result = view.template.asEntryPoint().render(self, env, { appendTo: target, dynamicScope });
+      env.commit();
+    }
 
     this._scheduler.registerView(view);
 
@@ -164,8 +202,8 @@ class Renderer {
     view._transitionTo('inDOM');
   }
 
-  rerender(view) {
-    (view['_renderResult'] || this._root['_renderResult']).rerender();
+  rerender(view, options) {
+    (view['_renderResult'] || this._root['_renderResult']).rerender(options);
   }
 
   remove(view) {

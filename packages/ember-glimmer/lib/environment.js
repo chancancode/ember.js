@@ -122,6 +122,13 @@ export default class Environment extends GlimmerEnvironment {
   }
 
   refineStatement(statement) {
+    // 1. resolve any native syntax – if, unless, with, each, and partial
+    let nativeSyntax = super.refineStatement(statement);
+
+    if (nativeSyntax) {
+      return nativeSyntax;
+    }
+
     let {
       isSimple,
       isInline,
@@ -133,37 +140,34 @@ export default class Environment extends GlimmerEnvironment {
       templates
     } = statement;
 
-    if (key !== 'partial' && isSimple && (isInline || isBlock)) {
+    if (isSimple && (isInline || isBlock)) {
+      // 2. built-in syntaxs
       if (key === 'component') {
         return new DynamicComponentSyntax({ args, templates });
       } else if (key === 'outlet') {
         return new OutletSyntax({ args });
-      } else if (key.indexOf('-') >= 0) {
-        let definition = this.getComponentDefinition(path);
+      }
 
-        if (definition) {
-          wrapClassBindingAttribute(args);
-          wrapClassAttribute(args);
-          return new CurlyComponentSyntax({ args, definition, templates });
-        } else if (isBlock && !this.hasHelper(key)) {
-          assert(`A helper named '${path[0]}' could not be found`, false);
-        }
-      } else {
-        // Check if it's a keyword
-        let mappedKey = builtInComponents[key];
-        if (mappedKey) {
-          let definition = this.getComponentDefinition([mappedKey]);
-          wrapClassBindingAttribute(args);
-          wrapClassAttribute(args);
-          return new CurlyComponentSyntax({ args, definition, templates });
-        }
+      // 3. resolve components
+      let internalKey = builtInComponents[key];
+      let definition = null;
+
+      if (internalKey) {
+        definition = this.getComponentDefinition([internalKey]);
+      } else if (key.indexOf('-') >= 0) {
+        definition = this.getComponentDefinition(path);
+      }
+
+      if (definition) {
+        wrapClassBindingAttribute(args);
+        wrapClassAttribute(args);
+        return new CurlyComponentSyntax({ args, definition, templates });
       }
     }
 
-    let nativeSyntax = super.refineStatement(statement);
-    assert(`Helpers may not be used in the block form, for example {{#${key}}}{{/${key}}}. Please use a component, or alternatively use the helper in combination with a built-in Ember helper, for example {{#if (${key})}}{{/if}}.`, !nativeSyntax && key && this.hasHelper(key) ? !isBlock : true);
-    assert(`Helpers may not be used in the element form.`, !nativeSyntax && key && this.hasHelper(key) ? !isModifier : true);
-    return nativeSyntax;
+    assert(`Helpers may not be used in the block form, for example {{#${key}}}{{/${key}}}. Please use a component, or alternatively use the helper in combination with a built-in Ember helper, for example {{#if (${key})}}{{/if}}.`, !isBlock || !this.hasHelper(key));
+    assert(`Helpers may not be used in the element form.`, !isModifier || !this.hasHelper(key));
+    assert(`Could not find component named "${key}" (no component or template with that name was found)`, isBlock);
   }
 
   hasComponentDefinition() {
@@ -179,8 +183,6 @@ export default class Environment extends GlimmerEnvironment {
 
       if (ComponentClass || layout) {
         definition = this._components[name] = new CurlyComponentDefinition(name, ComponentClass, layout);
-      } else if (!this.hasHelper(name)) {
-        assert(`Glimmer error: Could not find component named "${name}" (no component or template with that name was found)`, !!(ComponentClass || layout));
       }
     }
 

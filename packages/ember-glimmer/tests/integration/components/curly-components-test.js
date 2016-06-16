@@ -2,6 +2,7 @@
 import isEnabled from 'ember-metal/features';
 import { set } from 'ember-metal/property_set';
 import { observer } from 'ember-metal/mixin';
+import EmberObject from 'ember-runtime/system/object';
 import { Component, compile } from '../../utils/helpers';
 import { A as emberA } from 'ember-runtime/system/native_array';
 import { strip } from '../../utils/abstract-test-case';
@@ -1966,7 +1967,7 @@ moduleFor('Components test: curly components', class extends RenderingTest {
     assert.equal(outer._viewRegistry, viewRegistry);
   }
 
-  ['@htmlbars component should rerender when a property is changed during children\'s rendering'](assert) {
+  ['@test component should rerender when a property is changed during children\'s rendering'](assert) {
     expectDeprecation(/modified value twice in a single render/);
 
     let outer, middle;
@@ -2016,17 +2017,75 @@ moduleFor('Components test: curly components', class extends RenderingTest {
     this.runTask(() => outer.set('value', 2));
 
     assert.equal(this.$('#inner-value').text(), '2', 'second render of inner');
-    assert.equal(this.$('#middle-value').text(), '2', 'second render of middle');
+    assert.equal(this.$('#middle-value').text(), '2', 'second render of middle'); // FAIL
 
     this.runTask(() => outer.set('value', 3));
 
     assert.equal(this.$('#inner-value').text(), '3', 'third render of inner');
-    assert.equal(this.$('#middle-value').text(), '3', 'third render of middle');
+    assert.equal(this.$('#middle-value').text(), '3', 'third render of middle'); // FAIL
 
     this.runTask(() => outer.set('value', 1));
 
     assert.equal(this.$('#inner-value').text(), '1', 'reset render of inner');
-    assert.equal(this.$('#middle-value').text(), '1', 'reset render of middle');
+    assert.equal(this.$('#middle-value').text(), '1', 'reset render of middle'); // FAIL
+  }
+
+
+  ['@test component should rerender when a shared dependency is changed during children\'s rendering'](assert) {
+    expectDeprecation(/modified wrapper.content twice in a single render/);
+
+    let outer, middle;
+
+    this.registerComponent('x-outer', {
+      ComponentClass: Component.extend({
+        init() {
+          this._super(...arguments);
+          outer = this;
+        },
+        value: 1,
+        wrapper: EmberObject.create({ content: null })
+      }),
+      template: '<div id="outer-value">{{wrapper.content}}</div> {{x-inner value=value wrapper=wrapper}}'
+    });
+
+    this.registerComponent('x-inner', {
+      ComponentClass: Component.extend({
+        init() {
+          this._super(...arguments);
+          middle = this;
+        },
+        didReceiveAttrs() {
+          this.get('wrapper').set('content', this.get('value'));
+        },
+        value: null
+      }),
+      template: '<div id="inner-value">{{wrapper.content}}</div>'
+    });
+
+    this.render('{{x-outer}}');
+
+    assert.equal(this.$('#inner-value').text(), '1', 'initial render of inner');
+    assert.equal(this.$('#outer-value').text(), '1', 'initial render of outer');
+
+    this.runTask(() => this.rerender());
+
+    assert.equal(this.$('#inner-value').text(), '1', 'initial render of inner');
+    assert.equal(this.$('#outer-value').text(), '1', 'initial render of outer');
+
+    this.runTask(() => outer.set('value', 2));
+
+    assert.equal(this.$('#inner-value').text(), '2', 'second render of inner');
+    assert.equal(this.$('#outer-value').text(), '2', 'second render of outer');
+
+    this.runTask(() => outer.set('value', 3));
+
+    assert.equal(this.$('#inner-value').text(), '3', 'third render of inner');
+    assert.equal(this.$('#outer-value').text(), '3', 'third render of outer');
+
+    this.runTask(() => outer.set('value', 1));
+
+    assert.equal(this.$('#inner-value').text(), '1', 'reset render of inner');
+    assert.equal(this.$('#outer-value').text(), '1', 'reset render of outer');
   }
 
   ['@test non-block with each rendering child components']() {
